@@ -1,4 +1,3 @@
-
 from fintect.config import Settings
 
 

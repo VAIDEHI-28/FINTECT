@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI
 
 from fintect.config import settings

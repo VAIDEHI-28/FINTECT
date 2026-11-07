@@ -1,4 +1,3 @@
-
 from fastapi.testclient import TestClient
 
 from fintect.main import app
