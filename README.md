@@ -62,4 +62,49 @@ FINTECT is planned around the following components:
 
 Modules will be implemented incrementally, with tests, documentation, and version-controlled changes.
 
+## Local Infrastructure
 
+FINTECT uses Docker Compose to run PostgreSQL locally.
+
+### Prerequisites
+- Docker Desktop with WSL integration enabled
+- Docker Compose
+
+### Setup
+
+1. Copy `.env.example` to `.env`.
+2. Configure your local environment variables.
+3. Start PostgreSQL:
+
+   ```bash
+   docker compose up -d postgres
+   ```
+
+4. Verify the database:
+
+   ```bash
+   docker compose ps
+   docker compose exec postgres pg_isready -U fintect -d fintect
+   ```
+
+### Database Configuration
+
+- Database: `fintect`
+- User: `fintect`
+- Port: `5432`
+- PostgreSQL: `16`
+- Persistent volume: `fintect_postgres_data`
+
+### Stop PostgreSQL
+
+```bash
+docker compose down
+```
+
+To remove the database volume and all stored database data:
+
+```bash
+docker compose down -v
+```
+
+**Warning:** `docker compose down -v` permanently deletes the local PostgreSQL data volume.
