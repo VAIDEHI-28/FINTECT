@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     fineract_password: SecretStr = SecretStr("")
     fineract_tenant_id: str = "default"
     fineract_timeout_seconds: float = 10.0
+    fineract_verify_tls: bool = True
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
