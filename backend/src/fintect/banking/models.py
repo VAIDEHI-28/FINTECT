@@ -54,3 +54,11 @@ class BankingError(BaseModel):
     message: str = Field(min_length=1)
     operation: str = Field(min_length=1)
     retryable: bool = False
+
+
+class BankingException(Exception):
+    """Exception carrying a canonical banking error."""
+
+    def __init__(self, error: BankingError) -> None:
+        self.error = error
+        super().__init__(error.message)
