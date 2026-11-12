@@ -5,6 +5,8 @@ from fintect.banking.models import (
     AccountBalanceResponse,
     AccountDetailsRequest,
     AccountDetailsResponse,
+    BankingTransaction,
+    TransactionDetailsRequest,
     TransactionHistoryRequest,
     TransactionHistoryResponse,
 )
@@ -30,4 +32,13 @@ class BankingInterface(Protocol):
     async def get_transaction_history(
         self,
         request: TransactionHistoryRequest,
-    ) -> TransactionHistoryResponse: ...
+    ) -> TransactionHistoryResponse:
+        """Retrieve savings account transaction history."""
+        ...
+
+    async def get_transaction_details(
+        self,
+        request: TransactionDetailsRequest,
+    ) -> BankingTransaction:
+        """Retrieve details of a specific savings account transaction."""
+        ...

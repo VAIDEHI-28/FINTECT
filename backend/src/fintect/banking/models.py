@@ -116,6 +116,20 @@ class TransactionHistoryRequest(BaseModel):
         return value
 
 
+class TransactionDetailsRequest(BaseModel):
+    """Request to retrieve a specific savings account transaction."""
+
+    account_id: str = Field(min_length=1)
+    transaction_id: str = Field(min_length=1)
+
+    @field_validator("account_id", "transaction_id")
+    @classmethod
+    def validate_identifiers(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Identifiers must not be blank.")
+        return value
+
+
 class TransactionHistoryResponse(BaseModel):
     account_id: str
     transactions: list[BankingTransaction]

@@ -15,6 +15,7 @@ from fintect.banking.models import (
     BankingErrorCode,
     BankingException,
     BankingTransaction,
+    TransactionDetailsRequest,
     TransactionHistoryRequest,
     TransactionHistoryResponse,
 )
@@ -249,6 +250,60 @@ class FineractAdapter(BankingInterface):
                 total_count=data.get("totalFilteredRecords"),
                 limit=request.limit,
                 offset=request.offset,
+            )
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            InvalidOperation,
+            ValidationError,
+        ) as exc:
+            self._raise_for_invalid_response(operation)
+            raise AssertionError("Unreachable") from exc
+
+    async def get_transaction_details(
+        self,
+        request: TransactionDetailsRequest,
+    ) -> BankingTransaction:
+        """Retrieve a specific savings account transaction from Fineract."""
+        operation = "get_transaction_details"
+
+        try:
+            response = await self._client.get(
+                f"savingsaccounts/{request.account_id}/transactions/"
+                f"{request.transaction_id}"
+            )
+        except httpx.RequestError as exc:
+            self._raise_for_request_error(exc, operation)
+
+        self._raise_for_banking_error(response, operation)
+
+        try:
+            item = response.json()
+            raw_date = item["date"]
+
+            if isinstance(raw_date, list):
+                transaction_date = datetime(*raw_date)
+            else:
+                transaction_date = datetime.fromisoformat(
+                    str(raw_date).replace("Z", "+00:00")
+                )
+
+            status = (
+                TransactionStatus.REVERSED
+                if item.get("reversed", False)
+                else TransactionStatus.COMPLETED
+            )
+
+            return BankingTransaction(
+                transaction_id=str(item["id"]),
+                account_id=str(item["accountId"]),
+                transaction_type=item["transactionType"]["value"].lower(),
+                amount=Decimal(str(item["amount"])),
+                currency=item["currency"]["code"],
+                transaction_date=transaction_date,
+                status=status,
+                description=item.get("note"),
             )
         except (
             KeyError,

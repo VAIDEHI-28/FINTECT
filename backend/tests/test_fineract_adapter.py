@@ -13,6 +13,7 @@ from fintect.banking.models import (
     BankingErrorCode,
     BankingException,
     BankingTransaction,
+    TransactionDetailsRequest,
     TransactionHistoryRequest,
     TransactionHistoryResponse,
 )
@@ -582,5 +583,220 @@ async def test_fineract_adapter_maps_malformed_transaction_history(
 
         assert exc_info.value.error.code == BankingErrorCode.BANKING_OPERATION_FAILED
 
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_returns_transaction_details():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/savingsaccounts/1/transactions/101")
+        return httpx.Response(
+            200,
+            json={
+                "id": 101,
+                "accountId": 1,
+                "date": [2026, 11, 12],
+                "transactionType": {"value": "Deposit"},
+                "amount": 500.00,
+                "currency": {"code": "INR"},
+                "note": "Salary",
+                "reversed": False,
+            },
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(
+        settings=Settings(_env_file=None),
+        client=client,
+    )
+
+    try:
+        result = await adapter.get_transaction_details(
+            TransactionDetailsRequest(
+                account_id="1",
+                transaction_id="101",
+            )
+        )
+
+        assert isinstance(result, BankingTransaction)
+        assert result.transaction_id == "101"
+        assert result.account_id == "1"
+        assert result.transaction_type == "deposit"
+        assert result.amount == Decimal("500.0")
+        assert result.currency == "INR"
+        assert result.transaction_date == datetime(2026, 11, 12)
+        assert result.status == TransactionStatus.COMPLETED
+        assert result.description == "Salary"
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_returns_reversed_transaction_details():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": 102,
+                "accountId": 1,
+                "date": "2026-11-12",
+                "transactionType": {"value": "Withdrawal"},
+                "amount": 200.00,
+                "currency": {"code": "INR"},
+                "note": "ATM",
+                "reversed": True,
+            },
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(
+        settings=Settings(_env_file=None),
+        client=client,
+    )
+
+    try:
+        result = await adapter.get_transaction_details(
+            TransactionDetailsRequest(
+                account_id="1",
+                transaction_id="102",
+            )
+        )
+
+        assert result.transaction_id == "102"
+        assert result.transaction_type == "withdrawal"
+        assert result.status == TransactionStatus.REVERSED
+        assert result.description == "ATM"
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_code", "retryable"),
+    [
+        (404, BankingErrorCode.ACCOUNT_NOT_FOUND, False),
+        (401, BankingErrorCode.BANKING_AUTHENTICATION_FAILED, False),
+        (403, BankingErrorCode.BANKING_AUTHENTICATION_FAILED, False),
+        (500, BankingErrorCode.BANKING_SERVICE_UNAVAILABLE, True),
+    ],
+)
+@pytest.mark.anyio
+async def test_fineract_adapter_maps_transaction_details_http_errors(
+    status_code: int,
+    expected_code: BankingErrorCode,
+    retryable: bool,
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status_code,
+            json={"internal_details": "Do not expose this"},
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(
+        settings=Settings(_env_file=None),
+        client=client,
+    )
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_transaction_details(
+                TransactionDetailsRequest(
+                    account_id="1",
+                    transaction_id="101",
+                )
+            )
+
+        error = exc_info.value.error
+        assert error.code == expected_code
+        assert error.retryable is retryable
+        assert error.operation == "get_transaction_details"
+        assert "Do not expose this" not in error.message
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_maps_transaction_details_timeout():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("request timed out")
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(
+        settings=Settings(_env_file=None),
+        client=client,
+    )
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_transaction_details(
+                TransactionDetailsRequest(
+                    account_id="1",
+                    transaction_id="101",
+                )
+            )
+
+        error = exc_info.value.error
+        assert error.code == BankingErrorCode.BANKING_SERVICE_UNAVAILABLE
+        assert error.retryable is True
+        assert error.operation == "get_transaction_details"
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"id": 101},
+        {
+            "id": 101,
+            "accountId": 1,
+            "date": [2026, 11, 12],
+            "transactionType": {"value": "Deposit"},
+            "amount": "invalid",
+            "currency": {"code": "INR"},
+        },
+    ],
+)
+@pytest.mark.anyio
+async def test_fineract_adapter_maps_malformed_transaction_details(payload):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(
+        settings=Settings(_env_file=None),
+        client=client,
+    )
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_transaction_details(
+                TransactionDetailsRequest(
+                    account_id="1",
+                    transaction_id="101",
+                )
+            )
+
+        error = exc_info.value.error
+        assert error.code == BankingErrorCode.BANKING_OPERATION_FAILED
+        assert error.operation == "get_transaction_details"
+        assert error.retryable is False
     finally:
         await client.aclose()

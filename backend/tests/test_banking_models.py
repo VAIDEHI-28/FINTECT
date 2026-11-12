@@ -12,6 +12,7 @@ from fintect.banking.models import (
     BankingError,
     BankingErrorCode,
     BankingTransaction,
+    TransactionDetailsRequest,
     TransactionHistoryRequest,
     TransactionHistoryResponse,
 )
@@ -152,3 +153,38 @@ def test_transaction_history_response_valid():
 
     assert len(response.transactions) == 1
     assert response.total_count == 100
+
+
+# M1.3: Transaction details request tests
+
+
+def test_transaction_details_request_valid():
+    request = TransactionDetailsRequest(
+        account_id="1",
+        transaction_id="101",
+    )
+
+    assert request.account_id == "1"
+    assert request.transaction_id == "101"
+
+
+@pytest.mark.parametrize("account_id", ["", "   "])
+def test_transaction_details_request_rejects_blank_account_id(
+    account_id: str,
+):
+    with pytest.raises(ValidationError):
+        TransactionDetailsRequest(
+            account_id=account_id,
+            transaction_id="101",
+        )
+
+
+@pytest.mark.parametrize("transaction_id", ["", "   "])
+def test_transaction_details_request_rejects_blank_transaction_id(
+    transaction_id: str,
+):
+    with pytest.raises(ValidationError):
+        TransactionDetailsRequest(
+            account_id="1",
+            transaction_id=transaction_id,
+        )
