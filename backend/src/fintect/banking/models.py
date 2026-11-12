@@ -115,6 +115,35 @@ class CustomerDetails(BaseModel):
     active: bool = Field(strict=True)
 
 
+class AccountLookupRequest(BaseModel):
+    """Request to retrieve a customer's savings accounts."""
+
+    client_id: str = Field(min_length=1)
+
+    @field_validator("client_id")
+    @classmethod
+    def validate_client_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Client ID must not be blank.")
+        return value
+
+
+class CustomerSavingsAccount(BaseModel):
+    """Canonical savings account returned during customer account lookup."""
+
+    account_id: str
+    account_number: str
+    product_name: str
+    account_status: str
+
+
+class AccountLookupResponse(BaseModel):
+    """Canonical response containing a customer's savings accounts."""
+
+    client_id: str
+    savings_accounts: list[CustomerSavingsAccount]
+
+
 class SavingsAccountOverviewRequest(BaseModel):
     """Request to retrieve a savings account overview."""
 

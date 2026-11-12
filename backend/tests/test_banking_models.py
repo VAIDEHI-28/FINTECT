@@ -9,11 +9,14 @@ from fintect.banking.models import (
     AccountBalanceResponse,
     AccountDetailsRequest,
     AccountDetailsResponse,
+    AccountLookupRequest,
+    AccountLookupResponse,
     BankingError,
     BankingErrorCode,
     BankingTransaction,
     CustomerDetails,
     CustomerLookupRequest,
+    CustomerSavingsAccount,
     SavingsAccountOverview,
     SavingsAccountOverviewRequest,
     TransactionDetailsRequest,
@@ -295,3 +298,67 @@ def test_customer_details_rejects_invalid_active(active):
             office_name="Head Office",
             active=active,
         )
+
+
+# M1.6: Account lookup model tests
+
+
+def test_account_lookup_request_valid():
+    request = AccountLookupRequest(client_id="1")
+
+    assert request.client_id == "1"
+
+
+@pytest.mark.parametrize("client_id", ["", "   "])
+def test_account_lookup_request_rejects_blank_client_id(client_id):
+    with pytest.raises(ValidationError):
+        AccountLookupRequest(client_id=client_id)
+
+
+def test_customer_savings_account_valid():
+    account = CustomerSavingsAccount(
+        account_id="101",
+        account_number="000000101",
+        product_name="Passbook Savings",
+        account_status="Active",
+    )
+
+    assert account.account_id == "101"
+    assert account.account_number == "000000101"
+    assert account.product_name == "Passbook Savings"
+    assert account.account_status == "Active"
+
+
+def test_account_lookup_response_valid():
+    response = AccountLookupResponse(
+        client_id="1",
+        savings_accounts=[
+            CustomerSavingsAccount(
+                account_id="101",
+                account_number="000000101",
+                product_name="Passbook Savings",
+                account_status="Active",
+            ),
+            CustomerSavingsAccount(
+                account_id="102",
+                account_number="000000102",
+                product_name="Regular Savings",
+                account_status="Closed",
+            ),
+        ],
+    )
+
+    assert response.client_id == "1"
+    assert len(response.savings_accounts) == 2
+    assert response.savings_accounts[0].account_id == "101"
+    assert response.savings_accounts[1].account_status == "Closed"
+
+
+def test_account_lookup_response_allows_empty_accounts():
+    response = AccountLookupResponse(
+        client_id="1",
+        savings_accounts=[],
+    )
+
+    assert response.client_id == "1"
+    assert response.savings_accounts == []

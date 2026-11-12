@@ -11,12 +11,15 @@ from fintect.banking.models import (
     AccountBalanceResponse,
     AccountDetailsRequest,
     AccountDetailsResponse,
+    AccountLookupRequest,
+    AccountLookupResponse,
     BankingError,
     BankingErrorCode,
     BankingException,
     BankingTransaction,
     CustomerDetails,
     CustomerLookupRequest,
+    CustomerSavingsAccount,
     SavingsAccountOverview,
     SavingsAccountOverviewRequest,
     TransactionDetailsRequest,
@@ -395,6 +398,45 @@ class FineractAdapter(BankingInterface):
                 client_status=data["status"]["value"],
                 office_name=data["officeName"],
                 active=data["active"],
+            )
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            ValidationError,
+        ) as exc:
+            self._raise_for_invalid_response(operation)
+            raise AssertionError("Unreachable") from exc
+
+    async def get_customer_accounts(
+        self,
+        request: AccountLookupRequest,
+    ) -> AccountLookupResponse:
+        """Retrieve a customer's savings accounts from Fineract."""
+        operation = "get_customer_accounts"
+
+        try:
+            response = await self._client.get(f"clients/{request.client_id}/accounts")
+        except httpx.RequestError as exc:
+            self._raise_for_request_error(exc, operation)
+
+        self._raise_for_banking_error(response, operation)
+
+        try:
+            data = response.json()
+            savings_accounts = [
+                CustomerSavingsAccount(
+                    account_id=str(account["id"]),
+                    account_number=account["accountNo"],
+                    product_name=account["productName"],
+                    account_status=account["status"]["value"],
+                )
+                for account in data.get("savingsAccounts", [])
+            ]
+
+            return AccountLookupResponse(
+                client_id=request.client_id,
+                savings_accounts=savings_accounts,
             )
         except (
             KeyError,
