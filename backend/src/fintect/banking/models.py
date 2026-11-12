@@ -92,6 +92,40 @@ class AccountDetailsResponse(BaseModel):
     client_id: str | None = None
 
 
+class SavingsAccountOverviewRequest(BaseModel):
+    """Request to retrieve a savings account overview."""
+
+    account_id: str = Field(min_length=1)
+
+    @field_validator("account_id")
+    @classmethod
+    def validate_account_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Account ID must not be blank.")
+        return value
+
+
+class SavingsAccountOverview(BaseModel):
+    """Canonical savings account overview."""
+
+    account_id: str
+    account_number: str
+    account_name: str | None = None
+    account_status: AccountStatus
+    currency: str = Field(min_length=3, max_length=3)
+    product_name: str | None = None
+    client_id: str | None = None
+    account_balance: Decimal
+    available_balance: Decimal
+
+    @field_validator("account_balance", "available_balance", mode="before")
+    @classmethod
+    def require_decimal(cls, value: object) -> Decimal:
+        if not isinstance(value, Decimal):
+            raise ValueError("Monetary values must be Decimal")
+        return value
+
+
 class BankingTransaction(BaseModel):
     transaction_id: str
     account_id: str

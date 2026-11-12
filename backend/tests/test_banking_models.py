@@ -12,6 +12,8 @@ from fintect.banking.models import (
     BankingError,
     BankingErrorCode,
     BankingTransaction,
+    SavingsAccountOverview,
+    SavingsAccountOverviewRequest,
     TransactionDetailsRequest,
     TransactionHistoryRequest,
     TransactionHistoryResponse,
@@ -187,4 +189,64 @@ def test_transaction_details_request_rejects_blank_transaction_id(
         TransactionDetailsRequest(
             account_id="1",
             transaction_id=transaction_id,
+        )
+
+
+# M1.4: Savings account overview model tests
+
+
+def test_savings_account_overview_request_valid():
+    request = SavingsAccountOverviewRequest(account_id="1")
+
+    assert request.account_id == "1"
+
+
+@pytest.mark.parametrize("account_id", ["", "   "])
+def test_savings_account_overview_request_rejects_blank_id(account_id):
+    with pytest.raises(ValidationError):
+        SavingsAccountOverviewRequest(account_id=account_id)
+
+
+def test_savings_account_overview_valid():
+    overview = SavingsAccountOverview(
+        account_id="1",
+        account_number="000000001",
+        account_name="Savings Account",
+        account_status=AccountStatus.ACTIVE,
+        currency="USD",
+        product_name="Savings",
+        client_id="1",
+        account_balance=Decimal("1000.50"),
+        available_balance=Decimal("900.50"),
+    )
+
+    assert overview.account_id == "1"
+    assert overview.account_status == AccountStatus.ACTIVE
+    assert overview.account_balance == Decimal("1000.50")
+    assert overview.available_balance == Decimal("900.50")
+
+
+@pytest.mark.parametrize("value", [100.50, 100, "100.50"])
+def test_savings_account_overview_rejects_non_decimal_balance(value):
+    with pytest.raises(ValidationError):
+        SavingsAccountOverview(
+            account_id="1",
+            account_number="000000001",
+            account_status=AccountStatus.ACTIVE,
+            currency="USD",
+            account_balance=value,
+            available_balance=Decimal("900.50"),
+        )
+
+
+@pytest.mark.parametrize("currency", ["US", "USDD", ""])
+def test_savings_account_overview_rejects_invalid_currency(currency):
+    with pytest.raises(ValidationError):
+        SavingsAccountOverview(
+            account_id="1",
+            account_number="000000001",
+            account_status=AccountStatus.ACTIVE,
+            currency=currency,
+            account_balance=Decimal("1000.00"),
+            available_balance=Decimal("900.00"),
         )

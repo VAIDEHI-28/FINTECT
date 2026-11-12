@@ -13,6 +13,8 @@ from fintect.banking.models import (
     BankingErrorCode,
     BankingException,
     BankingTransaction,
+    SavingsAccountOverview,
+    SavingsAccountOverviewRequest,
     TransactionDetailsRequest,
     TransactionHistoryRequest,
     TransactionHistoryResponse,
@@ -797,6 +799,205 @@ async def test_fineract_adapter_maps_malformed_transaction_details(payload):
         error = exc_info.value.error
         assert error.code == BankingErrorCode.BANKING_OPERATION_FAILED
         assert error.operation == "get_transaction_details"
+        assert error.retryable is False
+    finally:
+        await client.aclose()
+
+
+# M1.4: Savings account overview adapter tests
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_returns_savings_account_overview():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path.endswith("/savingsaccounts/1")
+
+        return httpx.Response(
+            200,
+            json={
+                "id": 1,
+                "accountNo": "000000001",
+                "name": "My Savings",
+                "status": {"value": "Active"},
+                "currency": {"code": "USD"},
+                "productName": "Savings",
+                "clientId": 10,
+                "summary": {
+                    "accountBalance": 1250.50,
+                    "availableBalance": 1200.00,
+                },
+            },
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        result = await adapter.get_savings_account_overview(
+            SavingsAccountOverviewRequest(account_id="1")
+        )
+
+        assert isinstance(result, SavingsAccountOverview)
+        assert result.account_id == "1"
+        assert result.account_number == "000000001"
+        assert result.account_name == "My Savings"
+        assert result.account_status == AccountStatus.ACTIVE
+        assert result.currency == "USD"
+        assert result.product_name == "Savings"
+        assert result.client_id == "10"
+        assert result.account_balance == Decimal("1250.50")
+        assert result.available_balance == Decimal("1200.00")
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.parametrize(
+    ("status_value", "expected_status"),
+    [
+        ("Active", AccountStatus.ACTIVE),
+        ("Approved", AccountStatus.ACTIVE),
+        ("Frozen", AccountStatus.FROZEN),
+        ("Closed", AccountStatus.CLOSED),
+    ],
+)
+@pytest.mark.anyio
+async def test_fineract_adapter_maps_overview_account_status(
+    status_value: str,
+    expected_status: AccountStatus,
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": 1,
+                "accountNo": "000000001",
+                "status": {"value": status_value},
+                "currency": {"code": "USD"},
+                "summary": {
+                    "accountBalance": 100,
+                    "availableBalance": 90,
+                },
+            },
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        result = await adapter.get_savings_account_overview(
+            SavingsAccountOverviewRequest(account_id="1")
+        )
+
+        assert result.account_status == expected_status
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_overview_maps_404_to_account_not_found():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "Provider details"})
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_savings_account_overview(
+                SavingsAccountOverviewRequest(account_id="999")
+            )
+
+        error = exc_info.value.error
+        assert error.code == BankingErrorCode.ACCOUNT_NOT_FOUND
+        assert error.operation == "get_savings_account_overview"
+        assert error.retryable is False
+        assert "Provider details" not in error.message
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_overview_maps_timeout():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("request timed out")
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_savings_account_overview(
+                SavingsAccountOverviewRequest(account_id="1")
+            )
+
+        error = exc_info.value.error
+        assert error.code == BankingErrorCode.BANKING_SERVICE_UNAVAILABLE
+        assert error.retryable is True
+        assert error.operation == "get_savings_account_overview"
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"id": 1},
+        {
+            "id": 1,
+            "accountNo": "000000001",
+            "status": {"value": "Unknown"},
+            "currency": {"code": "USD"},
+            "summary": {
+                "accountBalance": 100,
+                "availableBalance": 90,
+            },
+        },
+        {
+            "id": 1,
+            "accountNo": "000000001",
+            "status": {"value": "Active"},
+            "currency": {"code": "USD"},
+            "summary": {
+                "accountBalance": "invalid",
+                "availableBalance": 90,
+            },
+        },
+    ],
+)
+@pytest.mark.anyio
+async def test_fineract_adapter_overview_rejects_invalid_response(payload):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_savings_account_overview(
+                SavingsAccountOverviewRequest(account_id="1")
+            )
+
+        error = exc_info.value.error
+        assert error.code == BankingErrorCode.BANKING_OPERATION_FAILED
+        assert error.operation == "get_savings_account_overview"
         assert error.retryable is False
     finally:
         await client.aclose()

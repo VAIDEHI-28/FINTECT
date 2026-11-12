@@ -15,6 +15,8 @@ from fintect.banking.models import (
     BankingErrorCode,
     BankingException,
     BankingTransaction,
+    SavingsAccountOverview,
+    SavingsAccountOverviewRequest,
     TransactionDetailsRequest,
     TransactionHistoryRequest,
     TransactionHistoryResponse,
@@ -304,6 +306,59 @@ class FineractAdapter(BankingInterface):
                 transaction_date=transaction_date,
                 status=status,
                 description=item.get("note"),
+            )
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            InvalidOperation,
+            ValidationError,
+        ) as exc:
+            self._raise_for_invalid_response(operation)
+            raise AssertionError("Unreachable") from exc
+
+    async def get_savings_account_overview(
+        self,
+        request: SavingsAccountOverviewRequest,
+    ) -> SavingsAccountOverview:
+        """Retrieve savings account metadata and balances from Fineract."""
+        operation = "get_savings_account_overview"
+
+        try:
+            response = await self._client.get(f"savingsaccounts/{request.account_id}")
+        except httpx.RequestError as exc:
+            self._raise_for_request_error(exc, operation)
+
+        self._raise_for_banking_error(response, operation)
+
+        try:
+            data = response.json()
+            summary = data["summary"]
+            status_value = data["status"]["value"].lower()
+
+            status_mapping = {
+                "active": AccountStatus.ACTIVE,
+                "approved": AccountStatus.ACTIVE,
+                "frozen": AccountStatus.FROZEN,
+                "closed": AccountStatus.CLOSED,
+            }
+
+            account_status = status_mapping.get(status_value)
+            if account_status is None:
+                self._raise_for_invalid_response(operation)
+
+            return SavingsAccountOverview(
+                account_id=str(data["id"]),
+                account_number=str(data["accountNo"]),
+                account_name=data.get("name"),
+                account_status=account_status,
+                currency=data["currency"]["code"],
+                product_name=data.get("productName"),
+                client_id=(
+                    str(data["clientId"]) if data.get("clientId") is not None else None
+                ),
+                account_balance=Decimal(str(summary["accountBalance"])),
+                available_balance=Decimal(str(summary["availableBalance"])),
             )
         except (
             KeyError,
