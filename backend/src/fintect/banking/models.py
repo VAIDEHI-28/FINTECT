@@ -1,9 +1,10 @@
+from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from fintect.domain.enums import AccountStatus
+from fintect.domain.enums import AccountStatus, TransactionStatus
 
 
 class BankingErrorCode(str, Enum):
@@ -89,3 +90,35 @@ class AccountDetailsResponse(BaseModel):
     currency: str = Field(min_length=3, max_length=3)
     product_name: str | None = None
     client_id: str | None = None
+
+
+class BankingTransaction(BaseModel):
+    transaction_id: str
+    account_id: str
+    transaction_type: str
+    amount: Decimal
+    currency: str = Field(min_length=3, max_length=3)
+    transaction_date: datetime
+    status: TransactionStatus
+    description: str | None = None
+
+
+class TransactionHistoryRequest(BaseModel):
+    account_id: str = Field(min_length=1)
+    limit: int = Field(default=20, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+    @field_validator("account_id")
+    @classmethod
+    def validate_account_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Account ID must not be blank.")
+        return value
+
+
+class TransactionHistoryResponse(BaseModel):
+    account_id: str
+    transactions: list[BankingTransaction]
+    total_count: int | None = Field(default=None, ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)

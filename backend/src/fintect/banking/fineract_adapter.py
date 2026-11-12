@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -13,9 +14,12 @@ from fintect.banking.models import (
     BankingError,
     BankingErrorCode,
     BankingException,
+    BankingTransaction,
+    TransactionHistoryRequest,
+    TransactionHistoryResponse,
 )
 from fintect.config import Settings
-from fintect.domain.enums import AccountStatus
+from fintect.domain.enums import AccountStatus, TransactionStatus
 
 
 class FineractAdapter(BankingInterface):
@@ -180,6 +184,77 @@ class FineractAdapter(BankingInterface):
             KeyError,
             TypeError,
             ValueError,
+            ValidationError,
+        ) as exc:
+            self._raise_for_invalid_response(operation)
+            raise AssertionError("Unreachable") from exc
+
+    async def get_transaction_history(
+        self,
+        request: TransactionHistoryRequest,
+    ) -> TransactionHistoryResponse:
+        """Retrieve paginated savings account transactions from Fineract."""
+        operation = "get_transaction_history"
+
+        try:
+            response = await self._client.get(
+                f"savingsaccounts/{request.account_id}/transactions",
+                params={
+                    "offset": request.offset,
+                    "limit": request.limit,
+                },
+            )
+        except httpx.RequestError as exc:
+            self._raise_for_request_error(exc, operation)
+
+        self._raise_for_banking_error(response, operation)
+
+        try:
+            data = response.json()
+            records = data["transactions"]
+
+            transactions = []
+            for item in records:
+                raw_date = item["date"]
+
+                if isinstance(raw_date, list):
+                    transaction_date = datetime(*raw_date)
+                else:
+                    transaction_date = datetime.fromisoformat(
+                        str(raw_date).replace("Z", "+00:00")
+                    )
+
+                status = (
+                    TransactionStatus.REVERSED
+                    if item.get("reversed", False)
+                    else TransactionStatus.COMPLETED
+                )
+
+                transactions.append(
+                    BankingTransaction(
+                        transaction_id=str(item["id"]),
+                        account_id=str(item["accountId"]),
+                        transaction_type=item["transactionType"]["value"].lower(),
+                        amount=Decimal(str(item["amount"])),
+                        currency=item["currency"]["code"],
+                        transaction_date=transaction_date,
+                        status=status,
+                        description=item.get("note"),
+                    )
+                )
+
+            return TransactionHistoryResponse(
+                account_id=request.account_id,
+                transactions=transactions,
+                total_count=data.get("totalFilteredRecords"),
+                limit=request.limit,
+                offset=request.offset,
+            )
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            InvalidOperation,
             ValidationError,
         ) as exc:
             self._raise_for_invalid_response(operation)

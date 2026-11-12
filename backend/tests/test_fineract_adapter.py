@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 
 import httpx
@@ -11,9 +12,12 @@ from fintect.banking.models import (
     AccountDetailsResponse,
     BankingErrorCode,
     BankingException,
+    BankingTransaction,
+    TransactionHistoryRequest,
+    TransactionHistoryResponse,
 )
 from fintect.config import Settings
-from fintect.domain.enums import AccountStatus
+from fintect.domain.enums import AccountStatus, TransactionStatus
 
 
 @pytest.mark.anyio
@@ -401,5 +405,182 @@ async def test_fineract_adapter_maps_malformed_account_details(payload):
         assert error.code == BankingErrorCode.BANKING_OPERATION_FAILED
         assert error.operation == "get_account_details"
         assert error.retryable is False
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_returns_transaction_history():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/savingsaccounts/1/transactions")
+        assert request.url.params["offset"] == "0"
+        assert request.url.params["limit"] == "20"
+
+        return httpx.Response(
+            200,
+            json={
+                "totalFilteredRecords": 2,
+                "transactions": [
+                    {
+                        "id": 101,
+                        "accountId": 1,
+                        "date": [2026, 11, 12],
+                        "transactionType": {"value": "Deposit"},
+                        "amount": 500.00,
+                        "currency": {"code": "INR"},
+                        "note": "Salary",
+                        "reversed": False,
+                    },
+                    {
+                        "id": 102,
+                        "accountId": 1,
+                        "date": "2026-11-12",
+                        "transactionType": {"value": "Withdrawal"},
+                        "amount": 200.00,
+                        "currency": {"code": "INR"},
+                        "note": "ATM",
+                        "reversed": True,
+                    },
+                ],
+            },
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        result = await adapter.get_transaction_history(
+            TransactionHistoryRequest(account_id="1")
+        )
+
+        assert isinstance(result, TransactionHistoryResponse)
+        assert result.account_id == "1"
+        assert result.total_count == 2
+        assert result.limit == 20
+        assert result.offset == 0
+        assert len(result.transactions) == 2
+
+        deposit = result.transactions[0]
+        assert isinstance(deposit, BankingTransaction)
+        assert deposit.transaction_id == "101"
+        assert deposit.account_id == "1"
+        assert deposit.transaction_type == "deposit"
+        assert deposit.amount == Decimal("500.0")
+        assert deposit.currency == "INR"
+        assert deposit.status == TransactionStatus.COMPLETED
+        assert deposit.description == "Salary"
+        assert deposit.transaction_date == datetime(2026, 11, 12)
+
+        withdrawal = result.transactions[1]
+        assert withdrawal.transaction_id == "102"
+        assert withdrawal.transaction_type == "withdrawal"
+        assert withdrawal.amount == Decimal("200.0")
+        assert withdrawal.status == TransactionStatus.REVERSED
+        assert withdrawal.description == "ATM"
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_passes_transaction_pagination():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["offset"] == "40"
+        assert request.url.params["limit"] == "10"
+
+        return httpx.Response(
+            200,
+            json={
+                "totalFilteredRecords": 100,
+                "transactions": [],
+            },
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        result = await adapter.get_transaction_history(
+            TransactionHistoryRequest(account_id="1", limit=10, offset=40)
+        )
+
+        assert result.transactions == []
+        assert result.total_count == 100
+        assert result.limit == 10
+        assert result.offset == 40
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_maps_transaction_history_http_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={"message": "Savings account not found"},
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+
+    adapter = FineractAdapter(
+        settings=Settings(_env_file=None),
+        client=client,
+    )
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_transaction_history(
+                TransactionHistoryRequest(account_id="999")
+            )
+
+        assert exc_info.value.error.code == BankingErrorCode.ACCOUNT_NOT_FOUND
+
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"transactions": None},
+        {"transactions": [{}]},
+        {"transactions": [{"id": 1}]},
+        {"transactions": [{"id": 1, "date": "invalid-date"}]},
+    ],
+)
+async def test_fineract_adapter_maps_malformed_transaction_history(
+    payload: dict,
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+
+    adapter = FineractAdapter(
+        settings=Settings(_env_file=None),
+        client=client,
+    )
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_transaction_history(
+                TransactionHistoryRequest(account_id="1")
+            )
+
+        assert exc_info.value.error.code == BankingErrorCode.BANKING_OPERATION_FAILED
+
     finally:
         await client.aclose()

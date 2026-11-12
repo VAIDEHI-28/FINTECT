@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -10,8 +11,11 @@ from fintect.banking.models import (
     AccountDetailsResponse,
     BankingError,
     BankingErrorCode,
+    BankingTransaction,
+    TransactionHistoryRequest,
+    TransactionHistoryResponse,
 )
-from fintect.domain.enums import AccountStatus
+from fintect.domain.enums import AccountStatus, TransactionStatus
 
 
 def test_account_balance_request_valid():
@@ -89,3 +93,62 @@ def test_account_details_response_valid() -> None:
     assert response.account_number == "000000001"
     assert response.account_status == AccountStatus.ACTIVE
     assert response.currency == "USD"
+
+
+def test_banking_transaction_valid():
+    transaction = BankingTransaction(
+        transaction_id="101",
+        account_id="1",
+        transaction_type="deposit",
+        amount=Decimal("500.00"),
+        currency="INR",
+        transaction_date=datetime(2026, 11, 12, tzinfo=timezone.utc),
+        status=TransactionStatus.COMPLETED,
+        description="Salary",
+    )
+
+    assert transaction.transaction_id == "101"
+    assert transaction.amount == Decimal("500.00")
+    assert transaction.status == TransactionStatus.COMPLETED
+
+
+def test_transaction_history_request_defaults():
+    request = TransactionHistoryRequest(account_id="1")
+
+    assert request.limit == 20
+    assert request.offset == 0
+
+
+@pytest.mark.parametrize("limit", [0, 101, -1])
+def test_transaction_history_request_rejects_invalid_limit(limit):
+    with pytest.raises(ValidationError):
+        TransactionHistoryRequest(account_id="1", limit=limit)
+
+
+@pytest.mark.parametrize("offset", [-1, -10])
+def test_transaction_history_request_rejects_negative_offset(offset):
+    with pytest.raises(ValidationError):
+        TransactionHistoryRequest(account_id="1", offset=offset)
+
+
+def test_transaction_history_response_valid():
+    transaction = BankingTransaction(
+        transaction_id="101",
+        account_id="1",
+        transaction_type="deposit",
+        amount=Decimal("500.00"),
+        currency="INR",
+        transaction_date=datetime(2026, 11, 12, tzinfo=timezone.utc),
+        status=TransactionStatus.COMPLETED,
+    )
+
+    response = TransactionHistoryResponse(
+        account_id="1",
+        transactions=[transaction],
+        total_count=100,
+        limit=20,
+        offset=0,
+    )
+
+    assert len(response.transactions) == 1
+    assert response.total_count == 100
