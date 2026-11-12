@@ -8,11 +8,14 @@ from fintect.banking.interface import BankingInterface
 from fintect.banking.models import (
     AccountBalanceRequest,
     AccountBalanceResponse,
+    AccountDetailsRequest,
+    AccountDetailsResponse,
     BankingError,
     BankingErrorCode,
     BankingException,
 )
 from fintect.config import Settings
+from fintect.domain.enums import AccountStatus
 
 
 class FineractAdapter(BankingInterface):
@@ -26,7 +29,10 @@ class FineractAdapter(BankingInterface):
         self._client = client or create_fineract_client(settings)
 
     @staticmethod
-    def _raise_for_banking_error(response: httpx.Response) -> None:
+    def _raise_for_banking_error(
+        response: httpx.Response,
+        operation: str,
+    ) -> None:
         """Translate Fineract HTTP errors into canonical banking errors."""
         status_code = response.status_code
 
@@ -58,8 +64,40 @@ class FineractAdapter(BankingInterface):
             BankingError(
                 code=code,
                 message=message,
-                operation="get_account_balance",
+                operation=operation,
                 retryable=retryable,
+            )
+        )
+
+    @staticmethod
+    def _raise_for_request_error(
+        exc: httpx.RequestError,
+        operation: str,
+    ) -> None:
+        """Translate network errors into canonical banking errors."""
+        if isinstance(exc, httpx.TimeoutException):
+            message = "Banking service request timed out."
+        else:
+            message = "Unable to connect to banking service."
+
+        raise BankingException(
+            BankingError(
+                code=BankingErrorCode.BANKING_SERVICE_UNAVAILABLE,
+                message=message,
+                operation=operation,
+                retryable=True,
+            )
+        ) from exc
+
+    @staticmethod
+    def _raise_for_invalid_response(operation: str) -> None:
+        """Raise a safe canonical error for malformed Fineract responses."""
+        raise BankingException(
+            BankingError(
+                code=BankingErrorCode.BANKING_OPERATION_FAILED,
+                message="Banking service returned an invalid response.",
+                operation=operation,
+                retryable=False,
             )
         )
 
@@ -68,29 +106,14 @@ class FineractAdapter(BankingInterface):
         request: AccountBalanceRequest,
     ) -> AccountBalanceResponse:
         """Retrieve an account balance from Fineract."""
+        operation = "get_account_balance"
+
         try:
             response = await self._client.get(f"savingsaccounts/{request.account_id}")
-        except httpx.TimeoutException as exc:
-            raise BankingException(
-                BankingError(
-                    code=BankingErrorCode.BANKING_SERVICE_UNAVAILABLE,
-                    message="Banking service request timed out.",
-                    operation="get_account_balance",
-                    retryable=True,
-                )
-            ) from exc
         except httpx.RequestError as exc:
-            raise BankingException(
-                BankingError(
-                    code=BankingErrorCode.BANKING_SERVICE_UNAVAILABLE,
-                    message="Unable to connect to banking service.",
-                    operation="get_account_balance",
-                    retryable=True,
-                )
-            ) from exc
+            self._raise_for_request_error(exc, operation)
 
-        # HTTP errors must be handled before parsing the response body.
-        self._raise_for_banking_error(response)
+        self._raise_for_banking_error(response, operation)
 
         try:
             data = response.json()
@@ -110,11 +133,54 @@ class FineractAdapter(BankingInterface):
             InvalidOperation,
             ValidationError,
         ) as exc:
-            raise BankingException(
-                BankingError(
-                    code=BankingErrorCode.BANKING_OPERATION_FAILED,
-                    message="Banking service returned an invalid response.",
-                    operation="get_account_balance",
-                    retryable=False,
-                )
-            ) from exc
+            self._raise_for_invalid_response(operation)
+            raise AssertionError("Unreachable") from exc
+
+    async def get_account_details(
+        self,
+        request: AccountDetailsRequest,
+    ) -> AccountDetailsResponse:
+        """Retrieve account details from Fineract."""
+        operation = "get_account_details"
+
+        try:
+            response = await self._client.get(f"savingsaccounts/{request.account_id}")
+        except httpx.RequestError as exc:
+            self._raise_for_request_error(exc, operation)
+
+        self._raise_for_banking_error(response, operation)
+
+        try:
+            data = response.json()
+            status_value = data["status"]["value"].lower()
+
+            status_mapping = {
+                "active": AccountStatus.ACTIVE,
+                "approved": AccountStatus.ACTIVE,
+                "frozen": AccountStatus.FROZEN,
+                "closed": AccountStatus.CLOSED,
+            }
+
+            account_status = status_mapping.get(status_value)
+            if account_status is None:
+                self._raise_for_invalid_response(operation)
+
+            return AccountDetailsResponse(
+                account_id=str(data["id"]),
+                account_number=str(data["accountNo"]),
+                account_name=data.get("name"),
+                account_status=account_status,
+                currency=data["currency"]["code"],
+                product_name=data.get("productName"),
+                client_id=(
+                    str(data["clientId"]) if data.get("clientId") is not None else None
+                ),
+            )
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            ValidationError,
+        ) as exc:
+            self._raise_for_invalid_response(operation)
+            raise AssertionError("Unreachable") from exc

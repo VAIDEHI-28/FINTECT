@@ -3,6 +3,8 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from fintect.domain.enums import AccountStatus
+
 
 class BankingErrorCode(str, Enum):
     ACCOUNT_NOT_FOUND = "ACCOUNT_NOT_FOUND"
@@ -62,3 +64,28 @@ class BankingException(Exception):
     def __init__(self, error: BankingError) -> None:
         self.error = error
         super().__init__(error.message)
+
+
+class AccountDetailsRequest(BaseModel):
+    """Request to retrieve savings account details."""
+
+    account_id: str = Field(min_length=1)
+
+    @field_validator("account_id")
+    @classmethod
+    def validate_account_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Account ID must not be blank.")
+        return value
+
+
+class AccountDetailsResponse(BaseModel):
+    """Canonical savings account details returned by the banking interface."""
+
+    account_id: str
+    account_number: str
+    account_name: str | None = None
+    account_status: AccountStatus
+    currency: str = Field(min_length=3, max_length=3)
+    product_name: str | None = None
+    client_id: str | None = None
