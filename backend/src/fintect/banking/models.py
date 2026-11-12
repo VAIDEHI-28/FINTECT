@@ -92,6 +92,29 @@ class AccountDetailsResponse(BaseModel):
     client_id: str | None = None
 
 
+class CustomerLookupRequest(BaseModel):
+    """Request to retrieve customer details."""
+
+    client_id: str = Field(min_length=1)
+
+    @field_validator("client_id")
+    @classmethod
+    def validate_client_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Client ID must not be blank.")
+        return value
+
+
+class CustomerDetails(BaseModel):
+    """Canonical customer details returned by the banking interface."""
+
+    client_id: str
+    client_name: str
+    client_status: str
+    office_name: str
+    active: bool = Field(strict=True)
+
+
 class SavingsAccountOverviewRequest(BaseModel):
     """Request to retrieve a savings account overview."""
 

@@ -15,6 +15,8 @@ from fintect.banking.models import (
     BankingErrorCode,
     BankingException,
     BankingTransaction,
+    CustomerDetails,
+    CustomerLookupRequest,
     SavingsAccountOverview,
     SavingsAccountOverviewRequest,
     TransactionDetailsRequest,
@@ -365,6 +367,39 @@ class FineractAdapter(BankingInterface):
             TypeError,
             ValueError,
             InvalidOperation,
+            ValidationError,
+        ) as exc:
+            self._raise_for_invalid_response(operation)
+            raise AssertionError("Unreachable") from exc
+
+    async def get_customer_details(
+        self,
+        request: CustomerLookupRequest,
+    ) -> CustomerDetails:
+        """Retrieve customer details from Fineract."""
+        operation = "get_customer_details"
+
+        try:
+            response = await self._client.get(f"clients/{request.client_id}")
+        except httpx.RequestError as exc:
+            self._raise_for_request_error(exc, operation)
+
+        self._raise_for_banking_error(response, operation)
+
+        try:
+            data = response.json()
+
+            return CustomerDetails(
+                client_id=str(data["id"]),
+                client_name=data["displayName"],
+                client_status=data["status"]["value"],
+                office_name=data["officeName"],
+                active=data["active"],
+            )
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
             ValidationError,
         ) as exc:
             self._raise_for_invalid_response(operation)

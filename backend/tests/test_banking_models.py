@@ -12,6 +12,8 @@ from fintect.banking.models import (
     BankingError,
     BankingErrorCode,
     BankingTransaction,
+    CustomerDetails,
+    CustomerLookupRequest,
     SavingsAccountOverview,
     SavingsAccountOverviewRequest,
     TransactionDetailsRequest,
@@ -249,4 +251,47 @@ def test_savings_account_overview_rejects_invalid_currency(currency):
             currency=currency,
             account_balance=Decimal("1000.00"),
             available_balance=Decimal("900.00"),
+        )
+
+
+# M1.5: Customer lookup model tests
+
+
+def test_customer_lookup_request_valid():
+    request = CustomerLookupRequest(client_id="1")
+
+    assert request.client_id == "1"
+
+
+@pytest.mark.parametrize("client_id", ["", "   "])
+def test_customer_lookup_request_rejects_blank_id(client_id):
+    with pytest.raises(ValidationError):
+        CustomerLookupRequest(client_id=client_id)
+
+
+def test_customer_details_valid():
+    customer = CustomerDetails(
+        client_id="1",
+        client_name="Rahul Sharma",
+        client_status="Active",
+        office_name="Head Office",
+        active=True,
+    )
+
+    assert customer.client_id == "1"
+    assert customer.client_name == "Rahul Sharma"
+    assert customer.client_status == "Active"
+    assert customer.office_name == "Head Office"
+    assert customer.active is True
+
+
+@pytest.mark.parametrize("active", ["true", "invalid", 1, None])
+def test_customer_details_rejects_invalid_active(active):
+    with pytest.raises(ValidationError):
+        CustomerDetails(
+            client_id="1",
+            client_name="Rahul Sharma",
+            client_status="Active",
+            office_name="Head Office",
+            active=active,
         )

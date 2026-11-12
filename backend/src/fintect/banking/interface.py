@@ -6,6 +6,8 @@ from fintect.banking.models import (
     AccountDetailsRequest,
     AccountDetailsResponse,
     BankingTransaction,
+    CustomerDetails,
+    CustomerLookupRequest,
     SavingsAccountOverview,
     SavingsAccountOverviewRequest,
     TransactionDetailsRequest,
@@ -50,4 +52,11 @@ class BankingInterface(Protocol):
         request: SavingsAccountOverviewRequest,
     ) -> SavingsAccountOverview:
         """Retrieve savings account metadata and balances."""
+        ...
+
+    async def get_customer_details(
+        self,
+        request: CustomerLookupRequest,
+    ) -> CustomerDetails:
+        """Retrieve customer details."""
         ...

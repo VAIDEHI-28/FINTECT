@@ -13,6 +13,8 @@ from fintect.banking.models import (
     BankingErrorCode,
     BankingException,
     BankingTransaction,
+    CustomerDetails,
+    CustomerLookupRequest,
     SavingsAccountOverview,
     SavingsAccountOverviewRequest,
     TransactionDetailsRequest,
@@ -998,6 +1000,114 @@ async def test_fineract_adapter_overview_rejects_invalid_response(payload):
         error = exc_info.value.error
         assert error.code == BankingErrorCode.BANKING_OPERATION_FAILED
         assert error.operation == "get_savings_account_overview"
+        assert error.retryable is False
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_returns_customer_details():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/clients/1")
+
+        return httpx.Response(
+            200,
+            json={
+                "id": 1,
+                "displayName": "Rahul Sharma",
+                "status": {"value": "Active"},
+                "officeName": "Head Office",
+                "active": True,
+            },
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(
+        settings=Settings(_env_file=None),
+        client=client,
+    )
+
+    try:
+        result = await adapter.get_customer_details(
+            CustomerLookupRequest(client_id="1")
+        )
+
+        assert isinstance(result, CustomerDetails)
+        assert result.client_id == "1"
+        assert result.client_name == "Rahul Sharma"
+        assert result.client_status == "Active"
+        assert result.office_name == "Head Office"
+        assert result.active is True
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_maps_customer_404():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/clients/999")
+        return httpx.Response(404, json={"error": "Internal provider details"})
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_customer_details(CustomerLookupRequest(client_id="999"))
+
+        error = exc_info.value.error
+        assert error.code == BankingErrorCode.ACCOUNT_NOT_FOUND
+        assert error.operation == "get_customer_details"
+        assert error.retryable is False
+        assert "Internal provider details" not in error.message
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"id": 1},
+        {
+            "id": 1,
+            "displayName": "Rahul Sharma",
+            "status": {"value": "Active"},
+            "officeName": "Head Office",
+        },
+        {
+            "id": 1,
+            "displayName": "Rahul Sharma",
+            "status": {"value": "Active"},
+            "officeName": "Head Office",
+            "active": "invalid",
+        },
+    ],
+)
+@pytest.mark.anyio
+async def test_fineract_adapter_maps_malformed_customer_response(payload):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_customer_details(CustomerLookupRequest(client_id="1"))
+
+        error = exc_info.value.error
+        assert error.code == BankingErrorCode.BANKING_OPERATION_FAILED
+        assert error.operation == "get_customer_details"
         assert error.retryable is False
     finally:
         await client.aclose()
