@@ -416,7 +416,10 @@ class FineractAdapter(BankingInterface):
         operation = "get_customer_accounts"
 
         try:
-            response = await self._client.get(f"clients/{request.client_id}/accounts")
+            response = await self._client.get(
+                f"clients/{request.client_id}/accounts",
+                params={"fields": "savingsAccounts"},
+            )
         except httpx.RequestError as exc:
             self._raise_for_request_error(exc, operation)
 
@@ -424,6 +427,7 @@ class FineractAdapter(BankingInterface):
 
         try:
             data = response.json()
+
             savings_accounts = [
                 CustomerSavingsAccount(
                     account_id=str(account["id"]),
@@ -431,13 +435,14 @@ class FineractAdapter(BankingInterface):
                     product_name=account["productName"],
                     account_status=account["status"]["value"],
                 )
-                for account in data.get("savingsAccounts", [])
+                for account in data["savingsAccounts"]
             ]
 
             return AccountLookupResponse(
                 client_id=request.client_id,
                 savings_accounts=savings_accounts,
             )
+
         except (
             KeyError,
             TypeError,

@@ -1120,6 +1120,7 @@ async def test_fineract_adapter_maps_malformed_customer_response(payload):
 async def test_fineract_adapter_returns_customer_savings_accounts():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/clients/1/accounts")
+        assert request.url.params["fields"] == "savingsAccounts"
 
         return httpx.Response(
             200,
@@ -1218,6 +1219,29 @@ async def test_fineract_adapter_rejects_malformed_customer_savings_accounts():
         settings=Settings(_env_file=None),
         client=client,
     )
+
+    try:
+        with pytest.raises(BankingException):
+            await adapter.get_customer_accounts(AccountLookupRequest(client_id="1"))
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_fineract_adapter_rejects_missing_savings_accounts_field():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["fields"] == "savingsAccounts"
+
+        return httpx.Response(
+            200,
+            json={},
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
 
     try:
         with pytest.raises(BankingException):
