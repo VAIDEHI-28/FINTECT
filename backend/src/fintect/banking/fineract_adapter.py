@@ -392,6 +392,9 @@ class FineractAdapter(BankingInterface):
         try:
             data = response.json()
 
+            if not isinstance(data, dict):
+                self._raise_for_invalid_response(operation)
+
             return CustomerDetails(
                 client_id=str(data["id"]),
                 client_name=data["displayName"],

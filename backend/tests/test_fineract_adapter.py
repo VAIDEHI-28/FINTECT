@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from decimal import Decimal
 
@@ -1272,5 +1273,40 @@ async def test_fineract_adapter_customer_accounts_not_found():
             await adapter.get_customer_accounts(AccountLookupRequest(client_id="999"))
 
         assert exc_info.value.error.code == BankingErrorCode.ACCOUNT_NOT_FOUND
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        [],
+        "unexpected",
+    ],
+)
+async def test_fineract_adapter_rejects_non_object_customer_response(payload):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=json.dumps(payload),
+            headers={"content-type": "application/json"},
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(settings=Settings(_env_file=None), client=client)
+
+    try:
+        with pytest.raises(BankingException) as exc_info:
+            await adapter.get_customer_details(CustomerLookupRequest(client_id="1"))
+
+        error = exc_info.value.error
+        assert error.code == BankingErrorCode.BANKING_OPERATION_FAILED
+        assert error.operation == "get_customer_details"
+        assert error.retryable is False
     finally:
         await client.aclose()
