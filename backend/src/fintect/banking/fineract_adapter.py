@@ -113,6 +113,14 @@ class FineractAdapter(BankingInterface):
             )
         )
 
+    @staticmethod
+    def _require_string(value: object, operation: str) -> str:
+        """Validate that a required Fineract response value is a string."""
+        if not isinstance(value, str):
+            FineractAdapter._raise_for_invalid_response(operation)
+
+        return value
+
     async def get_account_balance(
         self,
         request: AccountBalanceRequest,
@@ -164,7 +172,10 @@ class FineractAdapter(BankingInterface):
 
         try:
             data = response.json()
-            status_value = data["status"]["value"].lower()
+            status_value = self._require_string(
+                data["status"]["value"],
+                operation,
+            ).lower()
 
             status_mapping = {
                 "active": AccountStatus.ACTIVE,
@@ -242,7 +253,10 @@ class FineractAdapter(BankingInterface):
                     BankingTransaction(
                         transaction_id=str(item["id"]),
                         account_id=str(item["accountId"]),
-                        transaction_type=item["transactionType"]["value"].lower(),
+                        transaction_type=self._require_string(
+                            item["transactionType"]["value"],
+                            operation,
+                        ).lower(),
                         amount=Decimal(str(item["amount"])),
                         currency=item["currency"]["code"],
                         transaction_date=transaction_date,
@@ -305,7 +319,10 @@ class FineractAdapter(BankingInterface):
             return BankingTransaction(
                 transaction_id=str(item["id"]),
                 account_id=str(item["accountId"]),
-                transaction_type=item["transactionType"]["value"].lower(),
+                transaction_type=self._require_string(
+                    item["transactionType"]["value"],
+                    operation,
+                ).lower(),
                 amount=Decimal(str(item["amount"])),
                 currency=item["currency"]["code"],
                 transaction_date=transaction_date,
@@ -339,7 +356,10 @@ class FineractAdapter(BankingInterface):
         try:
             data = response.json()
             summary = data["summary"]
-            status_value = data["status"]["value"].lower()
+            status_value = self._require_string(
+                data["status"]["value"],
+                operation,
+            ).lower()
 
             status_mapping = {
                 "active": AccountStatus.ACTIVE,

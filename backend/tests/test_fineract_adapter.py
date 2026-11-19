@@ -1310,3 +1310,113 @@ async def test_fineract_adapter_rejects_non_object_customer_response(payload):
         assert error.retryable is False
     finally:
         await client.aclose()
+
+
+@pytest.mark.parametrize("invalid_value", [None, 123, []])
+@pytest.mark.parametrize(
+    ("operation", "adapter_request", "payload", "expected_operation"),
+    [
+        (
+            "get_account_details",
+            AccountDetailsRequest(account_id="1"),
+            {
+                "id": 1,
+                "accountNo": "000000001",
+                "status": {"value": "INVALID"},
+                "currency": {"code": "INR"},
+            },
+            "get_account_details",
+        ),
+        (
+            "get_savings_account_overview",
+            SavingsAccountOverviewRequest(account_id="1"),
+            {
+                "id": 1,
+                "accountNo": "000000001",
+                "status": {"value": "INVALID"},
+                "currency": {"code": "INR"},
+                "summary": {
+                    "accountBalance": 100,
+                    "availableBalance": 90,
+                },
+            },
+            "get_savings_account_overview",
+        ),
+        (
+            "get_transaction_history",
+            TransactionHistoryRequest(account_id="1"),
+            {
+                "transactions": [
+                    {
+                        "id": 101,
+                        "accountId": 1,
+                        "date": [2026, 11, 12],
+                        "transactionType": {"value": "INVALID"},
+                        "amount": 100,
+                        "currency": {"code": "INR"},
+                    }
+                ]
+            },
+            "get_transaction_history",
+        ),
+        (
+            "get_transaction_details",
+            TransactionDetailsRequest(
+                account_id="1",
+                transaction_id="101",
+            ),
+            {
+                "id": 101,
+                "accountId": 1,
+                "date": [2026, 11, 12],
+                "transactionType": {"value": "INVALID"},
+                "amount": 100,
+                "currency": {"code": "INR"},
+            },
+            "get_transaction_details",
+        ),
+    ],
+)
+@pytest.mark.anyio
+async def test_fineract_adapter_rejects_non_string_nested_values(
+    operation,
+    adapter_request,
+    payload,
+    expected_operation,
+    invalid_value,
+):
+    if operation in {
+        "get_account_details",
+        "get_savings_account_overview",
+    }:
+        payload["status"]["value"] = invalid_value
+    else:
+        if operation == "get_transaction_history":
+            payload["transactions"][0]["transactionType"]["value"] = invalid_value
+        else:
+            payload["transactionType"]["value"] = invalid_value
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://fineract.test/api/v1/",
+    )
+    adapter = FineractAdapter(
+        settings=Settings(_env_file=None),
+        client=client,
+    )
+
+    try:
+        method = getattr(adapter, operation)
+
+        with pytest.raises(BankingException) as exc_info:
+            await method(adapter_request)
+
+        error = exc_info.value.error
+        assert error.code == BankingErrorCode.BANKING_OPERATION_FAILED
+        assert error.operation == expected_operation
+        assert error.retryable is False
+    finally:
+        await client.aclose()
