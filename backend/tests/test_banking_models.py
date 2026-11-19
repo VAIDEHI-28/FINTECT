@@ -362,3 +362,85 @@ def test_account_lookup_response_allows_empty_accounts():
 
     assert response.client_id == "1"
     assert response.savings_accounts == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+    ],
+)
+@pytest.mark.parametrize(
+    "field",
+    ["account_balance", "available_balance"],
+)
+def test_account_balance_response_rejects_non_finite_values(
+    field,
+    value,
+):
+    data = {
+        "account_id": "1",
+        "account_number": "000000001",
+        "currency": "INR",
+        "account_balance": Decimal("100.00"),
+        "available_balance": Decimal("90.00"),
+    }
+    data[field] = value
+
+    with pytest.raises(ValidationError):
+        AccountBalanceResponse(**data)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+    ],
+)
+@pytest.mark.parametrize(
+    "field",
+    ["account_balance", "available_balance"],
+)
+def test_savings_account_overview_rejects_non_finite_values(
+    field,
+    value,
+):
+    data = {
+        "account_id": "1",
+        "account_number": "000000001",
+        "account_status": AccountStatus.ACTIVE,
+        "currency": "INR",
+        "account_balance": Decimal("100.00"),
+        "available_balance": Decimal("90.00"),
+    }
+    data[field] = value
+
+    with pytest.raises(ValidationError):
+        SavingsAccountOverview(**data)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+    ],
+)
+def test_banking_transaction_rejects_non_finite_amount(value):
+    with pytest.raises(ValidationError):
+        BankingTransaction(
+            transaction_id="101",
+            account_id="1",
+            transaction_type="deposit",
+            amount=value,
+            currency="INR",
+            transaction_date=datetime(
+                2026, 11, 12, tzinfo=timezone.utc
+            ),
+            status=TransactionStatus.COMPLETED,
+        )
